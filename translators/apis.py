@@ -66,7 +66,10 @@ class Tse:
             t1 = time.time()
             r = func(*args, **kwargs)
             t2 = time.time()
-            logger.success('CostTime(fn: {}): {}s'.format(func.__name__, round((t2 - t1), 1)), style='braces')
+            logger.success(
+                f'CostTime(fn: {func.__name__}): {round(t2 - t1, 1)}s', style='braces'
+            )
+
             return r
         return wrapper
 
@@ -88,19 +91,25 @@ class Tse:
         }
         if not if_ajax:
             api_headers.pop('X-Requested-With')
-            api_headers.update({'Content-Type': 'text/plain'})
-        return host_headers if not if_use_api else api_headers
+            api_headers['Content-Type'] = 'text/plain'
+        return api_headers if if_use_api else host_headers
 
     @staticmethod
     def check_language(from_language, to_language, language_map, output_zh=None, output_auto='auto'):
         from_language = output_auto if from_language in ('auto', 'auto-detect') else from_language
         from_language = output_zh if output_zh and from_language in ('zh','zh-CN','zh-CHS','zh-Hans') else from_language
         to_language = output_zh if output_zh and to_language in ('zh','zh-CN','zh-CHS','zh-Hans') else to_language
-        
+
         if from_language != output_auto and from_language not in language_map:
-            raise TranslatorError('Unsupported from_language[{}] in {}.'.format(from_language,sorted(language_map.keys())))
+            raise TranslatorError(
+                f'Unsupported from_language[{from_language}] in {sorted(language_map.keys())}.'
+            )
+
         elif to_language not in language_map:
-            raise TranslatorError('Unsupported to_language[{}] in {}.'.format(to_language,sorted(language_map.keys())))
+            raise TranslatorError(
+                f'Unsupported to_language[{to_language}] in {sorted(language_map.keys())}.'
+            )
+
         elif from_language != output_auto and to_language not in language_map[from_language]:
             logger.exception('language_map:', language_map)
             raise TranslatorError('Unsupported translation: from [{0}] to [{1}]!'.format(from_language,to_language))
@@ -126,8 +135,6 @@ class TranslatorSeverRegion:
 
         except requests.exceptions.ConnectionError:
             raise TranslatorError('Unable to connect the Internet.\n')
-        except:
-            raise TranslatorError('Unable to find server backend.\n')
 
 
 class TranslatorError(Exception):
@@ -157,8 +164,8 @@ class GoogleV1(Tse):
         while c < size_b - 2:
             d = b[c + 2]
             d = ord(d[0]) - 87 if 'a' <= d else int(d)
-            d = (a % 2**32) >> d if '+' == b[c + 1] else a << d
-            a = a + d & (2**32-1) if '+' == b[c] else a ^ d
+            d = (a % 2**32) >> d if b[c + 1] == '+' else a << d
+            a = a + d & (2**32-1) if b[c] == '+' else a ^ d
             c += 3
         return a
 
@@ -170,9 +177,13 @@ class GoogleV1(Tse):
             if int_v < 2**16:
                 ints.append(int_v)
             else:
-                # unicode, emoji
-                ints.append(int((int_v - 2**16) / 2**10 + 55296))
-                ints.append(int((int_v - 2**16) % 2**10 + 56320))
+                ints.extend(
+                    (
+                        int((int_v - 2**16) / 2**10 + 55296),
+                        int((int_v - 2**16) % 2**10 + 56320),
+                    )
+                )
+
         return ints
 
 
@@ -193,8 +204,7 @@ class GoogleV1(Tse):
                     if (l & 64512) == 55296 and g + 1 < size and ints[g + 1] & 64512 == 56320:
                         g += 1
                         l = 65536 + ((l & 1023) << 10) + (ints[g] & 1023)
-                        e.append(l >> 18 | 240)
-                        e.append(l >> 12 & 63 | 128)
+                        e.extend((l >> 18 | 240, l >> 12 & 63 | 128))
                     else:
                         e.append(l >> 12 | 224)
                     e.append(l >> 6 & 63 | 128) ##
@@ -214,7 +224,7 @@ class GoogleV1(Tse):
         if a < 0:
             a = (a & (2**31-1)) + 2**31
         a %= int(1E6)
-        return '{}.{}'.format(a, a ^ b)
+        return f'{a}.{a ^ b}'
 
     def get_language_map(self,host_html,ss,proxies):
         while 'source_code_name:' not in host_html:
@@ -222,7 +232,10 @@ class GoogleV1(Tse):
             time.sleep(0.01)
 
         lang_list_str = re.findall("source_code_name:\[(.*?)\],", host_html)[0]
-        lang_list_str = ('['+ lang_list_str + ']').replace('code','"code"').replace('name','"name"')
+        lang_list_str = f'[{lang_list_str}]'.replace('code', '"code"').replace(
+            'name', '"name"'
+        )
+
         lang_list = [x['code'] for x in eval(lang_list_str) if x['code'] != 'auto']
         return {}.fromkeys(lang_list,lang_list)
 
@@ -370,7 +383,7 @@ class Baidu(Tse):
 
     def get_sign_html(self, ss, host_html, proxies):
         try:
-            self.get_sign_url = re.search(self.get_sign_pattern,host_html).group(0)
+            self.get_sign_url = re.search(self.get_sign_pattern,host_html)[0]
             r = ss.get(self.get_sign_url, headers=self.host_headers, proxies=proxies)
             r.raise_for_status()
         except:
@@ -414,7 +427,7 @@ class Baidu(Tse):
         is_detail_result = kwargs.get('is_detail_result', False)
         proxies = kwargs.get('proxies', None)
         sleep_seconds = kwargs.get('sleep_seconds', 0.05 + random.random()/2 + 1e-100*2**self.query_count)
-    
+
         with requests.Session() as ss:
             host_html = ss.get(self.host_url, headers=self.host_headers, proxies=proxies).text
             sign_html = self.get_sign_html(ss, host_html, proxies)
@@ -423,23 +436,24 @@ class Baidu(Tse):
             self.new_bdtk = {"baidu_id": ss.cookies.get("BAIDUID"), "token": self.host_info.get("token")}
             self.language_map = self.host_info['langMap']
             from_language,to_language = self.check_language(from_language,to_language,self.language_map,output_zh=self.output_zh)
-            self.api_headers.update({"cookie": "BAIDUID={};".format(self.bdtk['baidu_id'])})
+            self.api_headers.update({"cookie": f"BAIDUID={self.bdtk['baidu_id']};"})
 
             if from_language == 'auto':
                 res = ss.post(self.langdetect_url, headers=self.api_headers, data={"query": query_text}, proxies=proxies)
                 from_language = res.json()['lan']
-            
+
             # param_data = {"from": from_language, "to": to_language}
             form_data = {
                 "from": from_language,
                 "to": to_language,
-                "query": str(query_text).strip(),  # from urllib.parse import quote_plus
-                "transtype": "translang",  # ["translang","realtime"]
+                "query": query_text.strip(),
+                "transtype": "translang",
                 "simple_means_flag": "3",
                 "sign": self.host_info.get('sign'),
-                "token": self.bdtk['token'],  # self.host_info.get('token'),
+                "token": self.bdtk['token'],
                 "domain": use_domain,
             }
+
             r = ss.post(self.api_url, headers=self.api_headers, data=urlencode(form_data).encode('utf-8'),proxies=proxies)
             r.raise_for_status()
             data = r.json()
@@ -468,12 +482,12 @@ class Youdao(Tse):
         lang_list = [(x.split('2')[0], [x.split('2')[1]]) for x in lang_list if '2' in x]
         lang_map = dict(map(lambda x: x, lang_list))
         lang_map.pop('zh-CHS')
-        lang_map.update({'zh-CHS': list(lang_map.keys())})
+        lang_map['zh-CHS'] = list(lang_map.keys())
         return lang_map
 
     def get_sign_key(self, ss, host_html, proxies):
         try:
-            self.get_new_sign_url = re.search(self.get_sign_pattern, host_html).group(0)
+            self.get_new_sign_url = re.search(self.get_sign_pattern, host_html)[0]
             r = ss.get(self.get_new_sign_url, headers=self.host_headers, proxies=proxies)
             r.raise_for_status()
         except:
@@ -483,27 +497,26 @@ class Youdao(Tse):
 
     def get_form(self, query_text, from_language, to_language, sign_key):
         ts = str(int(time.time()))
-        salt = str(ts) + str(random.randrange(0, 10))
+        salt = ts + str(random.randrange(0, 10))
         sign_text = ''.join(['fanyideskweb', query_text, salt, sign_key])
         sign = md5(sign_text.encode()).hexdigest()
         bv = md5(self.api_headers['User-Agent'][8:].encode()).hexdigest()
-        form = {
+        return {
             'i': str(query_text).strip(),
             'from': from_language,
             'to': to_language,
-            'lts': ts,                   # r = "" + (new Date).getTime()
-            'salt': salt,               # i = r + parseInt(10 * Math.random(), 10)
-            'sign': sign,               # n.md5("fanyideskweb" + e + i + "n%A-rKaT5fb[Gy?;N5@Tj"),e=text
-            'bv': bv,                   # n.md5(navigator.appVersion)
+            'lts': ts,  # r = "" + (new Date).getTime()
+            'salt': salt,  # i = r + parseInt(10 * Math.random(), 10)
+            'sign': sign,  # n.md5("fanyideskweb" + e + i + "n%A-rKaT5fb[Gy?;N5@Tj"),e=text
+            'bv': bv,  # n.md5(navigator.appVersion)
             'smartresult': 'dict',
             'client': 'fanyideskweb',
             'doctype': 'json',
             'version': '2.1',
             'keyfrom': 'fanyi.web',
-            'action': "FY_BY_DEFAULT", #'FY_BY_REALTlME',  # not time.["FY_BY_REALTlME","FY_BY_DEFAULT"]
+            'action': "FY_BY_DEFAULT",  #'FY_BY_REALTlME',  # not time.["FY_BY_REALTlME","FY_BY_DEFAULT"]
             # 'typoResult': 'false'
         }
-        return form
 
     # @Tse.time_stat
     def youdao_api(self, query_text:str, from_language:str='auto', to_language:str='en', **kwargs) -> Union[str,dict]:
@@ -530,7 +543,7 @@ class Youdao(Tse):
             from_language, to_language = self.check_language(from_language, to_language, self.language_map,output_zh=self.output_zh)
             from_language, to_language = ('auto','auto') if from_language=='auto' else (from_language,to_language)
 
-            form = self.get_form(str(query_text).strip(), from_language, to_language, sign_key)
+            form = self.get_form(query_text.strip(), from_language, to_language, sign_key)
             r = ss.post(self.api_url, data=form, headers=self.api_headers, proxies=proxies)
             r.raise_for_status()
             data = r.json()
@@ -539,7 +552,15 @@ class Youdao(Tse):
                                 'please specify parameters of `from_language` or `to_language`.')
         time.sleep(sleep_seconds)
         self.query_count += 1
-        return data if is_detail_result else ''.join(item['tgt'] if item['tgt'] else '\n' for result in data['translateResult'] for item in result)
+        return (
+            data
+            if is_detail_result
+            else ''.join(
+                item['tgt'] or '\n'
+                for result in data['translateResult']
+                for item in result
+            )
+        )
 
 
 class Tencent(Tse):
@@ -557,7 +578,10 @@ class Tencent(Tse):
     def get_language_map(self, ss, language_url, proxies):
         r = ss.get(language_url,headers=self.host_headers,proxies=proxies)
         r.raise_for_status()
-        lang_map_str = re.search(pattern='C={(.*?)}|languagePair = {(.*?)}', string=r.text, flags=re.S).group(0) #C=
+        lang_map_str = re.search(
+            pattern='C={(.*?)}|languagePair = {(.*?)}', string=r.text, flags=re.S
+        )[0]
+
         return execjs.get().eval(lang_map_str)
 
     # @Tse.time_stat
@@ -592,11 +616,12 @@ class Tencent(Tse):
             form_data = {
                 'source': from_language,
                 'target': to_language,
-                'sourceText': str(query_text).strip(),
+                'sourceText': query_text.strip(),
                 'qtv': qtv,
                 'qtk': qtk,
-                'sessionUuid': 'translate_uuid' + str(int(time.time()*1000))
+                'sessionUuid': f'translate_uuid{int(time.time()*1000)}',
             }
+
             r = ss.post(self.api_url, headers=self.api_headers, data=form_data,proxies=proxies)
             r.raise_for_status()
             data = r.json()
@@ -627,10 +652,10 @@ class Alibaba(Tse):
             e = host_response.cookies.get_dict().get("cna", "001")
             e = re.sub(pattern='[^a-z\d]', repl='', string=e.lower())[:16]
         else:
-            n, r = e[0:16], e[16:26]
+            n, r = e[:16], e[16:26]
             i = hex(int(r, 10))[2:] if re.match('^[\-+]?[0-9]+$', r) else r
             e = n + i
-    
+
         s = int(time.time() * 1000)
         o = ''.join([e, hex(s)[2:]])
         for _ in range(1, 10):
@@ -641,8 +666,15 @@ class Alibaba(Tse):
     def get_language_map(self, ss, biz_type, dmtrack_pageid, proxies):
         def _get_lang(language_url, params=None):
             language_dict = ss.get(language_url, params=params, headers=self.host_headers, proxies=proxies).json()
-            language_map = dict(map(lambda x: x, [(x['sourceLuange'], x['targetLanguages']) for x in language_dict['languageMap']]))
-            return language_map
+            return dict(
+                map(
+                    lambda x: x,
+                    [
+                        (x['sourceLuange'], x['targetLanguages'])
+                        for x in language_dict['languageMap']
+                    ],
+                )
+            )
 
         params = {'dmtrack_pageid': dmtrack_pageid, 'biz_type': biz_type}
         try:
@@ -669,7 +701,7 @@ class Alibaba(Tse):
         is_detail_result = kwargs.get('is_detail_result', False)
         proxies = kwargs.get('proxies', None)
         sleep_seconds = kwargs.get('sleep_seconds', 0.05 + random.random()/2 + 1e-100*2**self.query_count)
-        
+
         with requests.Session() as ss:
             host_response = ss.get(self.host_url, headers=self.host_headers, proxies=proxies)
             dmtrack_pageid = self.get_dmtrack_pageid(host_response)
@@ -679,11 +711,12 @@ class Alibaba(Tse):
             form_data = {
                 "srcLanguage": from_language,
                 "tgtLanguage": to_language,
-                "srcText": str(query_text).strip(),
+                "srcText": query_text.strip(),
                 "viewType": "",
                 "source": "",
                 "bizType": use_domain,
             }
+
             params = {"dmtrack_pageid":dmtrack_pageid}
             r = ss.post(self.api_url,headers=self.api_headers,data=form_data,params=params,proxies=proxies)
             r.raise_for_status()
@@ -741,7 +774,7 @@ class Bing(Tse):
         is_detail_result = kwargs.get('is_detail_result', False)
         proxies = kwargs.get('proxies', None)
         sleep_seconds = kwargs.get('sleep_seconds', 0.05 + random.random()/2 + 1e-100*2**self.query_count)
-    
+
         with requests.Session() as ss:
             host_html = ss.get(self.host_url, headers=self.host_headers, proxies=proxies).text
             self.host_info = self.get_host_info(host_html)
@@ -751,8 +784,17 @@ class Bing(Tse):
             from_language, to_language = self.check_language(from_language, to_language, self.language_map,
                                                              output_zh=self.output_zh,output_auto=self.output_auto)
             # params = {'isVertical': '1', '': '', 'IG': self.host_info['ig'], 'IID': self.host_info['iid']}
-            self.api_url = self.api_url + '?isVertical=1&&IG={}&IID={}'.format(self.host_info['ig'],self.host_info['iid'])
-            form_data = {'text': str(query_text).strip(), 'fromLang': from_language, 'to': to_language}
+            self.api_url = (
+                self.api_url
+                + f"?isVertical=1&&IG={self.host_info['ig']}&IID={self.host_info['iid']}"
+            )
+
+            form_data = {
+                'text': query_text.strip(),
+                'fromLang': from_language,
+                'to': to_language,
+            }
+
             r = ss.post(self.api_url, headers=self.host_headers, data=form_data, proxies=proxies)
             r.raise_for_status()
             data = r.json()
@@ -777,7 +819,7 @@ class Sogou(Tse):
     def get_language_map(self, ss, get_language_url, proxies):
         lang_html = ss.get(get_language_url,headers=self.host_headers,proxies=proxies).text
         lang_list_str = re.findall('"ALL":\[(.*?)\]', lang_html)[0]
-        lang_list = execjs.get().eval('[' + lang_list_str + ']')
+        lang_list = execjs.get().eval(f'[{lang_list_str}]')
         lang_list = [x['lang'] for x in lang_list]
         return {}.fromkeys(lang_list,lang_list)
     
@@ -787,23 +829,22 @@ class Sogou(Tse):
             uuid += hex(int(65536 * (1 + random.random())))[2:][1:]
             if i in range(1,5):
                 uuid += '-'
-        sign_text = "" + from_language + to_language + query_text + ''#'"8511813095152" #window.seccode
+        sign_text = f"{from_language}{to_language}{query_text}"
         sign = md5(sign_text.encode()).hexdigest()
-        form = {
+        return {
             "from": from_language,
             "to": to_language,
             "text": str(query_text).strip(),
-            "uuid": uuid, #"ec3ad428-09a8-42a5-97af-608b88697d4f",
-            "s": sign, #"c04897e2f7e7e9863ced444357b30356",
-            "client": "pc", #wap
-            "fr": "browser_pc", #browser_wap
+            "uuid": uuid,  # "ec3ad428-09a8-42a5-97af-608b88697d4f",
+            "s": sign,  # "c04897e2f7e7e9863ced444357b30356",
+            "client": "pc",  # wap
+            "fr": "browser_pc",  # browser_wap
             "pid": "sogou-dict-vr",
             "dict": "true",
             "word_group": "true",
             "second_query": "true",
             "needQc": "1",
         }
-        return form
     
     # @Tse.time_stat
     def sogou_api(self, query_text:str, from_language:str='auto', to_language:str='en', **kwargs) -> Union[str,dict]:
@@ -874,23 +915,30 @@ class Deepl(Tse):
 
     def context_sentences_param(self, sentences, from_language, to_language):
         sentences = [''] + sentences + ['']
-        param = {
+        return {
             'method': 'LMT_handle_jobs',
             'id': self.request_id + 2 * self.query_count + 1,
-            'jsonrpc':' 2.0',
+            'jsonrpc': ' 2.0',
             'params': {
-                'priority': 1, #-1 if 'quality': 'fast'
+                'priority': 1,  # -1 if 'quality': 'fast'
                 'commonJobParams': {},
-                'timestamp': int(time.time()*1000),
+                'timestamp': int(time.time() * 1000),
                 'jobs': [
                     {
                         'kind': 'default',
                         # 'quality': 'fast', # -1
                         'raw_en_sentence': sentences[i],
-                        'raw_en_context_before': [sentences[i-1]] if sentences[i-1] else [],
-                        'raw_en_context_after': [sentences[i+1]] if sentences[i+1] else [],
-                        'preferred_num_beams': 1 if len(sentences)>3 else 4, # 1 if two sentences else 4
-                    } for i in range(1,len(sentences)-1)
+                        'raw_en_context_before': [sentences[i - 1]]
+                        if sentences[i - 1]
+                        else [],
+                        'raw_en_context_after': [sentences[i + 1]]
+                        if sentences[i + 1]
+                        else [],
+                        'preferred_num_beams': 1
+                        if len(sentences) > 3
+                        else 4,  # 1 if two sentences else 4
+                    }
+                    for i in range(1, len(sentences) - 1)
                 ],
                 'lang': {
                     'user_preferred_langs': [to_language, from_language],
@@ -899,7 +947,6 @@ class Deepl(Tse):
                 },
             },
         }
-        return param
 
     # @Tse.time_stat
     def deepl_api(self, query_text:str, from_language:str='auto', to_language:str='en', **kwargs) -> Union[str,dict]:
@@ -997,7 +1044,7 @@ class Yandex(Tse):
                 'reason': 'auto',
                 'format': 'text'
             }
-            form_data = {'text': str(query_text).strip(), 'options': 4}
+            form_data = {'text': query_text.strip(), 'options': 4}
             r = ss.post(self.api_url,params=params,data=form_data,headers=self.api_headers,proxies=proxies)
             r.raise_for_status()
             data = r.json()
@@ -1044,7 +1091,7 @@ def translate_html(html_text:str, to_language:str='en', translator:Callable='aut
             assert param not in translator_params, f'{param} should not be in {translator_params}.'
 
     translator = google if translator=='auto' else translator
-    translator_params.update({'sleep_seconds': 1e-8})
+    translator_params['sleep_seconds'] = 1e-8
     pattern = re.compile(r"(?:^|(?<=>))([\s\S]*?)(?:(?=<)|$)") #TODO: <code></code>
     repl = lambda x: translator(query_text=x.group(1).strip(), to_language=to_language,**translator_params) if x.group(1).strip() else ''
     return re.sub(pattern=pattern, repl=repl, string=html_text)
